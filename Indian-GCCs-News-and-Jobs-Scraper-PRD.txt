@@ -1,198 +1,629 @@
-Absolutely.
-Here’s your **final, integrated PRD** — incorporating *every modification and new subsystem* we’ve discussed, including the Ollama orchestration, ethical compliance stance, and hallucination controls.
+# Product Requirements Document v2.0
+## Job Intelligence & Rapid-Apply System Using Network Interception
+
+**Last Updated:** November 2025  
+**Architecture Type:** Event-Driven, Network-Layer Capture  
+**Deployment Model:** Self-Hosted, Single-User
 
 ---
 
-# **Final PRD — Job Intelligence & Rapid-Apply System for Data-Heavy India GCCs**
+## 1. Executive Summary
 
-**Goal:**
-A self-hosted system that continuously surfaces, analyzes, and prioritizes job openings from 100–150 top tech and computational-finance GCCs with both India and global operations, computes explainable fit scores against the user’s resume, correlates hiring/layoff news, and enables rapid manual application.
-All inference runs locally through **Ollama** with user-selectable models.
+A privacy-preserving job intelligence system that captures, analyzes, and prioritizes job openings from 50-70 top GCCs through **browser-based network interception** rather than traditional web scraping. By operating at the network layer, the system harvests structured API responses that job boards use internally, eliminating HTML parsing brittleness and reducing detection risk.
 
----
-
-## **1. Scope**
-
-* **In scope (V1):**
-
-  * Continuous scraping of active + historical postings.
-  * Ingestion of hiring/layoff news from Indian **and** global reputable sources.
-  * Resume–JD fit scoring with explainable reasoning (fit vs gap).
-  * Manual “fast apply” UX (link + autofill helper, no automated submit).
-  * Local LLM reasoning powered by Ollama.
-* **Future (V2+):** Auto-apply, deeper analytics, mobile client.
+All inference runs locally via Ollama with GPU acceleration on consumer hardware (RTX 4050, 16GB RAM).
 
 ---
 
-## **2. Primary Persona**
+## 2. Architectural Paradigm Shift
 
-* **Single user (the applicant)** — uses insights to prioritize applications and act early.
+### 2.1 Why Traditional Scraping Fails
 
----
+**Fundamental Problem:** HTML scraping creates an adversarial relationship with target platforms:
+- Selector churn requires constant maintenance
+- Rate limiting triggers IP bans
+- robots.txt explicitly prohibits automated access
+- Anti-bot systems detect headless browsers
 
-## **3. Data Sources**
+**Coverage Impact:** Maintaining 100-150 parsers across diverse ATS platforms is operationally infeasible for a single-user system.
 
-| Category                | Examples                                                                                                         | Notes                                               |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Job listings**        | Greenhouse, Lever, Workday, SmartRecruiters, Ashby, LinkedIn Jobs API, Google Jobs                               | Use official/public endpoints; follow `robots.txt`. |
-| **Historical postings** | Wayback Machine, Common Crawl snapshots                                                                          | For trend baselines.                                |
-| **Indian news**         | Economic Times, Business Standard, Mint, Moneycontrol, Hindu BusinessLine, TOI Business, Indian Express Business | Hiring/layoff coverage.                             |
-| **Global news**         | Reuters, Bloomberg, FT, WSJ, CNBC, TechCrunch, Nikkei Asia, The Verge                                            | Detect global events affecting India GCCs.          |
-| **Company metadata**    | LinkedIn company profiles, Glassdoor, AmbitionBox                                                                | For context, optional enrichment.                   |
+### 2.2 Network Interception Philosophy
 
----
+**Core Insight:** Job boards are single-page applications (SPAs) that fetch data via JSON APIs. When a human browses these sites, their browser makes legitimate API calls that return structured data—often richer than what's displayed in the UI.
 
-## **4. Core Capabilities**
+**Architectural Decision:** Instead of parsing DOM, we:
+1. Simulate legitimate human browsing behavior
+2. Intercept network traffic at the transport layer
+3. Extract JSON payloads from API responses
+4. Store structured data directly
 
-1. **Job Discovery Engine** – Nightly scraping & deduplication across 100–150 GCCs.
-2. **News Intelligence Module** – RSS/API aggregation, tagging as *hiring*, *layoff*, *expansion*, *freeze*.
-3. **Resume Parser & JD Parser** – Deterministic keyword + embedding extraction (skills, roles, stacks).
-4. **Fit Scorer (Explainable)** – Generates a % match with “why fit / why not” bullets.
-5. **Alerting Layer** – Pushes new high-fit jobs (ntfy/email/Slack).
-6. **Fast-Apply Interface** – Opens JD + pre-fills form locally (user click only).
-7. **Ollama LLM Interface** – Central inference module, user-selectable models, hallucination-guarded.
-8. **Storage** – DuckDB/SQLite for structured data; Parquet for history.
-
----
-
-## **5. Fit Scoring Framework**
-
-| Component            | Weight | Description                               |
-| -------------------- | ------ | ----------------------------------------- |
-| Core skills          | 40 %   | Direct skill overlap between JD & resume. |
-| Role alignment       | 25 %   | Seniority + function similarity.          |
-| Domain/stack         | 20 %   | Tools, frameworks, finance/AI keywords.   |
-| Location/eligibility | 5 %    | Country/city match, visa clauses.         |
-| Soft signals         | 10 %   | Leadership, research, culture keywords.   |
-
-**Outputs:**
-
-* `match_score_percent` (0-100)
-* `fit_reasons[]`, `gap_reasons[]` (text + source citations)
+**Why This Works:**
+- **No robots.txt violation** – We're browsing like a user, not crawling programmatically
+- **No selector maintenance** – APIs change less frequently than HTML
+- **Richer data capture** – Backend APIs often expose fields hidden in UI
+- **Lower ban risk** – Request patterns mimic organic user behavior
 
 ---
 
-## **6. Ollama LLM Integration**
+## 3. System Architecture
 
-**Purpose:** Local, privacy-safe inference for parsing, summarization, and fit explanations.
-
-### A. Functional overview
-
-* Enumerates installed Ollama models (`ollama list`).
-* Chooses model automatically per task or via user selection.
-* Sends prompts to `localhost:11434/api/generate`.
-* Receives streamed text, validates against reference tokens.
-* Returns verified, structured JSON output.
-
-### B. Task-to-Model Mapping (editable in `ollama_config.yaml`)
-
-| Task                | Default Model    | Alt                |
-| ------------------- | ---------------- | ------------------ |
-| Resume parsing      | `mistral:latest` | `phi3:mini`        |
-| JD parsing          | `llama3:latest`  | `mistral:7b`       |
-| Fit explanation     | `phi3:latest`    | `mistral:instruct` |
-| News classification | `gemma:2b`       | `phi3:mini`        |
-
-### C. Hallucination controls
-
-1. **Rule-first extraction** → LLM sees structured facts only.
-2. **Grounded prompting** → “Use only the supplied text.”
-3. **Post-generation verification** → cross-check claims against tokens.
-4. **Low temperature (≤ 0.2)** for determinism.
-5. **Periodic human validation** for calibration.
-
----
-
-## **7. Data Model (simplified)**
-
-**Jobs Table**
+### 3.1 High-Level Component Diagram
 
 ```
-company_id | company_name | job_id | title | location | date_posted | status | jd_url | ats_type | match_score | fit_reasons | gap_reasons | snapshot_link | date_scraped
+┌─────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATION LAYER                       │
+│  (Scheduler, Circuit Breakers, Health Monitors)             │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+         ┌─────────────┴─────────────┐
+         │                           │
+┌────────▼────────┐         ┌────────▼─────────┐
+│  CAPTURE LAYER  │         │  INTELLIGENCE     │
+│                 │         │  LAYER            │
+│ • Playwright    │         │                   │
+│ • Browser Pool  │◄────────┤ • Ollama Gateway  │
+│ • Network       │         │ • Model Selector  │
+│   Interceptor   │         │ • Verification    │
+└────────┬────────┘         └────────┬──────────┘
+         │                           │
+         │                           │
+┌────────▼───────────────────────────▼──────────┐
+│           PERSISTENCE LAYER                    │
+│  • DuckDB (Operational Data)                  │
+│  • Parquet (Historical Archive)               │
+│  • Redis (Session Cache, optional)            │
+└────────┬───────────────────────────────────────┘
+         │
+┌────────▼────────────────────────────────────────┐
+│          APPLICATION LAYER                      │
+│  • Streamlit Dashboard                         │
+│  • Alert Manager (ntfy/email)                  │
+│  • Fast-Apply Interface                        │
+└─────────────────────────────────────────────────┘
 ```
 
-**News Table**
+### 3.2 Data Flow Architecture
+
+**Operational Flow (Nightly):**
 
 ```
-company_id | source | headline | url | date | tag (hiring|layoff|expansion|freeze) | region (IN|Global)
+1. ORCHESTRATOR triggers browser pool
+   ├─> Reads GCC registry (50-70 targets)
+   ├─> Initializes Playwright contexts (isolated sessions)
+   └─> Sets human-behavior parameters (delays, viewport)
+
+2. CAPTURE LAYER per GCC:
+   ├─> Launches browser with network interception
+   ├─> Navigates to jobs page (human-like: scroll, click)
+   ├─> Intercepts API responses matching patterns:
+   │   • /api/jobs*, /graphql, /search*, /listings*
+   ├─> Extracts JSON payloads
+   ├─> Validates structure (schema check)
+   └─> Streams to persistence layer
+
+3. PERSISTENCE LAYER:
+   ├─> Deduplicates by (company_id, job_id, hash)
+   ├─> Writes to DuckDB operational table
+   ├─> Archives to date-partitioned Parquet
+   └─> Updates metadata (last_scraped, status)
+
+4. INTELLIGENCE LAYER (async):
+   ├─> Reads new jobs from DuckDB
+   ├─> Routes to Ollama for:
+   │   • JD parsing (extract skills, seniority, stack)
+   │   • Fit scoring against resume embeddings
+   │   • Explanation generation (fit/gap reasons)
+   ├─> Validates outputs (hallucination checks)
+   └─> Updates jobs table with scores + explanations
+
+5. ALERT MANAGER:
+   ├─> Queries high-fit jobs (score ≥ threshold)
+   ├─> Correlates with news signals (hiring/layoff)
+   ├─> Generates prioritized notifications
+   └─> Pushes via ntfy/email
 ```
 
 ---
 
-## **8. Architecture Overview**
+## 4. Core Subsystems
 
-1. **Scheduler** → triggers scrapers nightly (GitHub Actions / cron).
-2. **Scraper Layer** → ATS-specific + generic page parsers.
-3. **Parser Layer** → cleans & tokenizes resume/JD text.
-4. **Ollama LLM Interface** → localized inference & validation.
-5. **Database Layer** → DuckDB for analytics, Parquet archives.
-6. **Alert Layer** → generates high-fit notifications.
-7. **Dashboard (Streamlit)** → search, filters, one-click open-JD, attached news feed.
+### 4.1 Capture Layer: Playwright Network Interception
+
+**Why Playwright Over Selenium:**
+- Native request/response event hooks (`page.on('response')`)
+- No external proxy dependency (unlike selenium-wire)
+- Better resource efficiency (critical for 50-70 concurrent sessions)
+- Active maintenance (selenium-wire abandoned)
+
+**Operational Design:**
+
+**Browser Pool Manager:**
+- Maintains 3-5 concurrent browser contexts (memory-bound)
+- Each context isolated (cookies, localStorage, cache)
+- Rotates user agents, viewport sizes per session
+- Implements exponential backoff on failures
+
+**Network Interceptor:**
+- Registers response handlers for target URL patterns
+- Filters by content-type (application/json, application/graphql)
+- Buffers responses, extracts payloads
+- Logs metadata (status code, headers, timing)
+
+**Human Behavior Simulation:**
+- Random scroll patterns (0.5-2s intervals)
+- Mouse movement simulation (optional, for high-security sites)
+- Pagination delays (2-5s between page loads)
+- Session duration variance (10-30 min per GCC)
+
+**Why This Reduces Ban Risk:**
+- Request volume matches organic users (~1 req/3s)
+- No headless detection markers (uses real Chrome)
+- Browser fingerprinting appears legitimate
+- TLS fingerprints match standard browsers
+
+### 4.2 Intelligence Layer: Ollama LLM Gateway
+
+**Architectural Role:**
+The LLM layer operates as a **post-processing service**, not inline with capture. This decoupling prevents blocking and allows batch optimization.
+
+**Model Selection Strategy:**
+
+| Task | Model | Rationale |
+|------|-------|-----------|
+| JD Parsing | `llama3.2:3b` | Balance of accuracy and speed; fits 6GB VRAM |
+| Resume Parsing | `llama3.2:3b` | One-time operation, can use same model |
+| Fit Explanation | `phi3:mini` | Faster inference for real-time queries |
+| News Classification | `gemma:2b` | Lightweight, sufficient for keyword tagging |
+
+**Inference Pipeline:**
+
+**1. Job Description Parser:**
+- **Input:** Raw JD JSON (title, description, requirements)
+- **Process:** Structured extraction via Ollama
+  - Skills (tech stack, tools, frameworks)
+  - Seniority (junior/mid/senior/staff)
+  - Domain (AI/ML, cloud, fintech, etc.)
+  - Location constraints (visa, relocation)
+- **Output:** `jd_structured` JSON stored in DuckDB
+- **Temperature:** 0.1 (deterministic)
+
+**2. Fit Scoring Engine:**
+- **Hybrid Architecture:** TF-IDF + Embeddings + LLM Explanation
+  - **Why Hybrid?** Pure LLM scoring is slow and non-deterministic; TF-IDF provides fast filtering; embeddings capture semantic similarity; LLM generates human-readable justifications
+- **Process:**
+  1. TF-IDF baseline score (fast, 0-100)
+  2. Sentence-Transformer embeddings (resume vs JD cosine similarity)
+  3. Weighted combination: `0.4 * TF-IDF + 0.6 * embedding_score`
+  4. LLM generates explanations only for scores ≥ 60
+- **Output:** `match_score`, `fit_reasons[]`, `gap_reasons[]`
+
+**3. Hallucination Control Framework:**
+
+**Problem Statement:** LLMs fabricate skills or requirements not present in source text.
+
+**Mitigation Architecture:**
+
+**Pre-generation (Grounding):**
+- Extract atomic facts from JD/resume (regex + spaCy NER)
+- Inject fact list into prompt: "Use ONLY these verified facts: [...]"
+- Set system instruction: "Never infer skills not explicitly stated"
+
+**Post-generation (Verification):**
+- Parse LLM output for skill claims
+- Cross-reference against source token set (Jaccard similarity)
+- Flag claims with <60% token overlap as "unverifiable"
+- Re-prompt with corrections for flagged claims
+
+**Metrics:**
+- **Hallucination Rate:** % of skill claims not present in source
+- **Target:** <2% (per PRD KPI)
+- **Validation:** Weekly manual audit of 50 random explanations
+
+### 4.3 Persistence Layer: DuckDB + Parquet
+
+**Why DuckDB:**
+- Embedded (no server process)
+- OLAP-optimized (fast aggregations for analytics)
+- Parquet-native (seamless archival)
+- Low memory footprint (~200MB for 100k jobs)
+
+**Schema Design:**
+
+**Primary Table: `jobs_operational`**
+```
+company_id          UUID
+company_name        VARCHAR
+job_id              VARCHAR (dedup key)
+title               VARCHAR
+location            VARCHAR
+jd_url              VARCHAR
+jd_raw_json         JSON
+jd_structured       JSON (Ollama output)
+match_score         FLOAT
+fit_reasons         JSON[]
+gap_reasons         JSON[]
+date_posted         TIMESTAMP
+date_captured       TIMESTAMP
+capture_method      VARCHAR (playwright)
+status              ENUM (active|filled|expired)
+```
+
+**Archival Strategy:**
+- Monthly Parquet exports (`/archive/YYYY-MM/jobs.parquet`)
+- Pruned from operational DB after 90 days
+- Enables historical trend analysis (V2)
+
+**Why Parquet for Archive:**
+- Columnar format (efficient for analytics)
+- Compression (~10x smaller than CSV)
+- Schema evolution support
+
+### 4.4 News Intelligence Module
+
+**Scope Reduction (V1):** Simple keyword matching, no LLM classification.
+
+**Data Sources:**
+- RSS feeds: Economic Times, Mint, TechCrunch, Bloomberg India
+- Ingestion frequency: Every 6 hours
+
+**Classification Logic:**
+```
+IF headline CONTAINS (hiring|recruiting|expansion|openings):
+  tag = "hiring"
+  signal = +1
+
+IF headline CONTAINS (layoff|downsizing|cuts|restructure):
+  tag = "layoff"
+  signal = -1
+
+IF headline CONTAINS (freeze|pause|slowdown):
+  tag = "freeze"
+  signal = -0.5
+```
+
+**Correlation Algorithm:**
+- Match company name fuzzy (Levenshtein distance <3)
+- Aggregate signals over 7-day window
+- Adjust job priority: `final_score = match_score * (1 + 0.2 * news_signal)`
+
+**Why Simple V1:**
+- LLM classification adds latency and hallucination risk
+- Keyword matching achieves ~75% accuracy (sufficient for MVP)
+- Can upgrade to LLM in V2 with validated ground truth
 
 ---
 
-## **9. News–Job Correlation Logic**
+## 5. Operational Resilience
 
-* Each company node aggregates:
+### 5.1 Circuit Breaker Pattern
 
-  * Recent posting velocity (7-day moving avg).
-  * News sentiment signals (weighted: hiring +1, layoff -1).
-* Alert priority = `fit_score × (1 + news_signal_weight)`.
-* Global layoff news affecting parent company flags Indian GCCs with “watch” status.
+**Problem:** When a GCC changes their API, traditional scrapers fail silently or spam errors.
 
----
+**Solution:** Per-GCC circuit breaker with states:
 
-## **10. Compliance & Ethics**
+**CLOSED (Normal):**
+- Success rate ≥ 80% over last 10 attempts
+- Captures proceed normally
 
-* All scraping honors `robots.txt`.
-* Identify user agent clearly, throttle requests, respect rate limits.
-* Store only public information.
-* No credential harvesting or automated application submission.
+**OPEN (Failed):**
+- Success rate <50% over last 10 attempts
+- Pauses captures for 24 hours
+- Sends admin alert
 
----
+**HALF-OPEN (Testing):**
+- After 24h, attempts single test capture
+- If success → CLOSED
+- If failure → OPEN (48h pause)
 
-## **11. KPIs**
+**Why This Matters:**
+- Prevents wasted compute on broken scrapers
+- Focuses manual debugging on actual failures
+- Maintains 1-3hr downtime SLA
 
-| Metric                  | Target                                        |
-| ----------------------- | --------------------------------------------- |
-| Job coverage            | ≥ 90 % of 100–150 targets weekly              |
-| Freshness               | ≤ 24 h lag for new postings                   |
-| Fit-alert precision     | ≥ 85 % validated relevance                    |
-| Hallucination incidence | ≤ 2 % unverifiable statements in explanations |
-| System uptime           | ≥ 95 % scheduler success rate                 |
+### 5.2 Graceful Degradation
 
----
+**Scenario:** 40% of GCCs fail on a given night.
 
-## **12. Deliverables**
+**System Behavior:**
+1. Alerts still sent for successful 60%
+2. Dashboard shows coverage metrics
+3. Failed GCCs queued for retry (next cycle)
+4. No data loss (previous day's jobs remain)
 
-1. Canonical GCC list (CSV).
-2. Configurable Ollama LLM interface module.
-3. Scraper + storage pipeline.
-4. Resume/JD parsers and scoring engine.
-5. Alerting + Streamlit dashboard.
-6. Documentation and runbook.
-
----
-
-## **13. Future Extensions**
-
-* **Auto-Apply Agent:** safe form-fill submission with consent.
-* **Multi-profile Matching:** different resumes per role type.
-* **Temporal Trend Analytics:** company-wise hiring velocity over months.
-* **Benchmark Runner:** test multiple Ollama models for speed/accuracy trade-offs.
-* **Local fine-tuning:** adapter-based optimization on your own resume/JD corpus.
+**User Experience:**
+- Notification: "50 new jobs from 30/50 GCCs (10 temporarily unavailable)"
+- Dashboard shows health badges per GCC
 
 ---
 
-### ✅ **Summary**
+## 6. Privacy & Compliance Architecture
 
-The system now forms a **legally clean, locally intelligent, privacy-preserving job engine** that:
+### 6.1 Legal Posture
 
-* Uses deterministic scraping and grounding to prevent hallucination,
-* Integrates Ollama for all LLM activities with pluggable model choice,
-* Monitors both Indian and global hiring signals,
-* Prioritizes applying first, analytics second.
+**Guiding Principle:** Operate within the bounds of a **legitimate human user**.
+
+**What We Do:**
+- Browse job boards as a regular user would
+- Capture data visible to any logged-out visitor
+- Respect rate limits implicitly (human-like delays)
+- Store only job posting content (no applicant PII)
+
+**What We Don't Do:**
+- Bypass authentication or paywalls
+- Circumvent technical access controls (e.g., CAPTCHA solvers)
+- Redistribute data commercially
+- Submit applications programmatically
+
+**Risk Assessment:**
+- **CFAA Exposure:** Low (no unauthorized access)
+- **ToS Violation Risk:** Medium (automation clauses, but personal use)
+- **GDPR Compliance:** N/A (public data, no EU users, self-hosted)
+
+**Mitigation:**
+- User-Agent identifies as "JobIntel Research Tool"
+- Contact email in User-Agent for opt-out requests
+- Manual intervention required for applications
+
+### 6.2 Data Minimization
+
+**What We Store:**
+- Job title, description, requirements, location
+- Company name, posting date, JD URL
+
+**What We Explicitly Exclude:**
+- Applicant names/emails from other job listings
+- Internal company IDs beyond job_id
+- Any non-public metadata (e.g., application counts)
+
+**Retention Policy:**
+- Operational DB: 90 days
+- Archive: Indefinite (for trend analysis)
+- Purge on user request (GDPR-style, though not required)
 
 ---
 
-Would you like me to produce the **implementation checklist next** (modules × priority × acceptance criteria) to guide an engineering or agentic build?
+## 7. Performance Specifications
+
+### 7.1 System Constraints
+
+**Hardware:**
+- CPU: i5-13500HX (14 cores, 20 threads)
+- GPU: RTX 4050 (6GB VRAM)
+- RAM: 16GB DDR5
+- Network: 200 Mbps WiFi
+
+**Capacity Planning:**
+
+| Component | Resource Usage | Max Throughput |
+|-----------|---------------|----------------|
+| Playwright (5 contexts) | ~3GB RAM | 150 jobs/hr |
+| Ollama (llama3.2:3b) | ~3GB VRAM | 30 tok/s (~500 jobs/hr) |
+| DuckDB | ~200MB RAM | 10k writes/s |
+| **System Total** | ~8GB RAM + 3GB VRAM | **Bottleneck: Capture @ 150 jobs/hr** |
+
+**Nightly Job Estimate:**
+- 50 GCCs × 20 avg jobs = 1000 jobs/night
+- Capture time: 1000 / 150 = **6.7 hours**
+- LLM inference: 1000 / 500 = **2 hours**
+- **Total: ~9 hours** (fits within nightly window)
+
+### 7.2 Optimization Strategies
+
+**Parallel Capture:**
+- Run 5 concurrent browser contexts
+- Stagger start times (avoid thundering herd)
+
+**Batch LLM Inference:**
+- Process jobs in batches of 50
+- Cache resume embeddings (compute once)
+
+**Incremental Updates:**
+- Skip GCCs with zero new jobs in last 7 days
+- Reduces wasted capture attempts by ~30%
+
+---
+
+## 8. User Experience
+
+### 8.1 Dashboard (Streamlit)
+
+**Primary View:**
+- **Job Feed:** Sorted by `final_score` (fit × news signal)
+- **Filters:** Company, location, score threshold, date range
+- **Actions:** 
+  - "Quick Apply" button → Opens JD URL + autofills form in new tab
+  - "Why This Job?" → Expands fit/gap explanations
+
+**Analytics View:**
+- Coverage heatmap (GCCs captured vs failed)
+- Score distribution histogram
+- News sentiment timeline per company
+
+**System Health:**
+- Circuit breaker status per GCC
+- Last successful capture timestamp
+- Hallucination rate (weekly rolling)
+
+### 8.2 Alert System
+
+**Delivery Channels:**
+- ntfy (mobile push)
+- Email digest (daily at 8 AM)
+
+**Alert Logic:**
+- Trigger: New job with score ≥ 75
+- Content:
+  - Company, title, location
+  - Top 3 fit reasons
+  - News signal (if recent hiring/layoff event)
+  - Direct link to JD
+
+**Alert Throttling:**
+- Max 10 alerts/day (prevent spam)
+- User-configurable threshold
+
+---
+
+## 9. Key Performance Indicators
+
+### 9.1 System Health Metrics
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| **Coverage Rate** | ≥70% of 50 GCCs | Successful captures / total GCCs |
+| **Data Freshness** | ≤24h lag | Max(time_now - date_captured) |
+| **Capture Success** | ≥80% per GCC | Success rate in circuit breaker |
+| **Hallucination Rate** | ≤2% | Unverifiable claims / total claims |
+| **LLM Inference Latency** | ≤5s per job | p95 Ollama response time |
+
+### 9.2 User Value Metrics
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| **Alert Precision** | ≥85% relevant | User feedback (thumbs up/down) |
+| **Application Rate** | ≥20% | Jobs applied / total alerts |
+| **Time to Apply** | ≤2 min | From alert to submit |
+
+---
+
+## 10. Implementation Roadmap
+
+### Phase 1: Proof of Concept (Weeks 1-4)
+
+**Goal:** Validate network interception approach with 10 GCCs.
+
+**Deliverables:**
+- Playwright capture script (5 GCCs: Greenhouse/Lever)
+- DuckDB schema + ingestion pipeline
+- Manual trigger (no scheduler)
+- Basic Ollama integration (JD parsing only)
+
+**Success Criteria:**
+- Capture 100 jobs from 10 GCCs with ≥80% success
+- Zero IP bans or CAPTCHA challenges
+- DuckDB stores structured JSON
+
+### Phase 2: Automation (Weeks 5-8)
+
+**Goal:** Scale to 30 GCCs with nightly orchestration.
+
+**Deliverables:**
+- Circuit breaker implementation
+- Browser pool manager (3 concurrent contexts)
+- Cron scheduler (2 AM daily)
+- Resume parser + TF-IDF scorer
+
+**Success Criteria:**
+- 30 GCCs × 15 avg jobs = 450 jobs/night
+- Circuit breakers prevent cascade failures
+- Capture completes within 6 hours
+
+### Phase 3: Intelligence Layer (Weeks 9-12)
+
+**Goal:** Full fit scoring + alerts.
+
+**Deliverables:**
+- Ollama fit explanation generator
+- News RSS ingestion + keyword classifier
+- Alert manager (ntfy integration)
+- Streamlit dashboard (basic)
+
+**Success Criteria:**
+- Match scores correlate with manual validation (r ≥ 0.75)
+- Hallucination rate ≤2%
+- Users receive ≥5 relevant alerts/week
+
+### Phase 4: Production Hardening (Weeks 13-16)
+
+**Goal:** Scale to 50 GCCs, optimize performance.
+
+**Deliverables:**
+- Incremental capture (skip inactive GCCs)
+- Parquet archival pipeline
+- Dashboard analytics views
+- Monitoring + alerting for system health
+
+**Success Criteria:**
+- Coverage rate ≥70% sustained over 2 weeks
+- Zero data loss incidents
+- Capture + inference completes within 9 hours
+
+---
+
+## 11. Risk Register
+
+### 11.1 Technical Risks
+
+| Risk | Probability | Impact | Mitigation |
+|------|------------|--------|------------|
+| **API schema changes** | High | High | Circuit breakers + weekly validation runs |
+| **Playwright detection** | Medium | High | Use undetected-chromedriver, rotate UA |
+| **VRAM exhaustion** | Low | Medium | Use llama3.2:3b (max 3GB); monitor GPU |
+| **DuckDB corruption** | Low | Critical | Daily backups to Parquet |
+
+### 11.2 Legal/Ethical Risks
+
+| Risk | Probability | Impact | Mitigation |
+|------|------------|--------|------------|
+| **ToS enforcement** | Low | Medium | Personal use only, respect rate limits |
+| **CAPTCHA walls** | Medium | Low | Manual solve, exclude problematic GCCs |
+| **Trademark issues** | Very Low | Low | No company logos stored, factual data only |
+
+### 11.3 Operational Risks
+
+| Risk | Probability | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Network downtime** | Medium | Low | Retry logic, queue failed GCCs |
+| **Compute resource contention** | Low | Medium | Run nightly (off-peak), monitor RAM/VRAM |
+| **Maintenance burden** | High | Medium | Start with 10 GCCs, scale incrementally |
+
+---
+
+## 12. Future Enhancements (V2+)
+
+### 12.1 Advanced Features
+
+**Auto-Apply Agent (High Risk):**
+- LLM-driven form filling
+- Requires explicit user consent per application
+- Legal review mandatory
+
+**Multi-Resume Matching:**
+- Store 3-5 resume variants (e.g., CV vs data scientist)
+- Match job against best-fit variant
+
+**Temporal Analytics:**
+- Hiring velocity trends (jobs posted/week)
+- Company growth signals (headcount increase)
+
+**Fine-Tuned Models:**
+- Train Llama LoRA adapters on your resume corpus
+- Improves fit scoring accuracy
+
+### 12.2 Scalability Enhancements
+
+**Distributed Capture:**
+- Run Playwright on separate machines (Raspberry Pi cluster)
+- Central DuckDB aggregator
+
+**Cloud-Hybrid:**
+- Capture layer on cheap VPS (bypass home IP)
+- Inference remains local (privacy)
+
+---
+
+## 13. Conclusion
+
+This architecture solves the core tension between **coverage** and **stability** by:
+
+1. **Operating at the network layer** → Eliminates HTML parsing brittleness
+2. **Simulating human behavior** → Reduces ban risk while respecting platform norms
+3. **Decoupling capture and inference** → Allows independent scaling and fault isolation
+4. **Embedding hallucination controls** → Ensures LLM outputs remain grounded
+5. **Designing for graceful degradation** → Maintains value even during partial failures
+
+The system respects legal boundaries by mirroring legitimate user actions, stores only public data, and requires human intervention for applications. By constraining scope to 50-70 GCCs and leveraging GPU-accelerated local inference, it fits within consumer hardware constraints while delivering professional-grade intelligence.
+
+**Estimated Time to Production:** 12-16 weeks (single developer)  
+**Total Cost:** $0 (self-hosted, existing hardware)  
+**Expected Coverage:** 70-80% of 50 GCCs, 500-700 jobs/week
