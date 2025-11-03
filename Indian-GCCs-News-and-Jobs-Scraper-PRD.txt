@@ -1,0 +1,198 @@
+Absolutely.
+Here’s your **final, integrated PRD** — incorporating *every modification and new subsystem* we’ve discussed, including the Ollama orchestration, ethical compliance stance, and hallucination controls.
+
+---
+
+# **Final PRD — Job Intelligence & Rapid-Apply System for Data-Heavy India GCCs**
+
+**Goal:**
+A self-hosted system that continuously surfaces, analyzes, and prioritizes job openings from 100–150 top tech and computational-finance GCCs with both India and global operations, computes explainable fit scores against the user’s resume, correlates hiring/layoff news, and enables rapid manual application.
+All inference runs locally through **Ollama** with user-selectable models.
+
+---
+
+## **1. Scope**
+
+* **In scope (V1):**
+
+  * Continuous scraping of active + historical postings.
+  * Ingestion of hiring/layoff news from Indian **and** global reputable sources.
+  * Resume–JD fit scoring with explainable reasoning (fit vs gap).
+  * Manual “fast apply” UX (link + autofill helper, no automated submit).
+  * Local LLM reasoning powered by Ollama.
+* **Future (V2+):** Auto-apply, deeper analytics, mobile client.
+
+---
+
+## **2. Primary Persona**
+
+* **Single user (the applicant)** — uses insights to prioritize applications and act early.
+
+---
+
+## **3. Data Sources**
+
+| Category                | Examples                                                                                                         | Notes                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **Job listings**        | Greenhouse, Lever, Workday, SmartRecruiters, Ashby, LinkedIn Jobs API, Google Jobs                               | Use official/public endpoints; follow `robots.txt`. |
+| **Historical postings** | Wayback Machine, Common Crawl snapshots                                                                          | For trend baselines.                                |
+| **Indian news**         | Economic Times, Business Standard, Mint, Moneycontrol, Hindu BusinessLine, TOI Business, Indian Express Business | Hiring/layoff coverage.                             |
+| **Global news**         | Reuters, Bloomberg, FT, WSJ, CNBC, TechCrunch, Nikkei Asia, The Verge                                            | Detect global events affecting India GCCs.          |
+| **Company metadata**    | LinkedIn company profiles, Glassdoor, AmbitionBox                                                                | For context, optional enrichment.                   |
+
+---
+
+## **4. Core Capabilities**
+
+1. **Job Discovery Engine** – Nightly scraping & deduplication across 100–150 GCCs.
+2. **News Intelligence Module** – RSS/API aggregation, tagging as *hiring*, *layoff*, *expansion*, *freeze*.
+3. **Resume Parser & JD Parser** – Deterministic keyword + embedding extraction (skills, roles, stacks).
+4. **Fit Scorer (Explainable)** – Generates a % match with “why fit / why not” bullets.
+5. **Alerting Layer** – Pushes new high-fit jobs (ntfy/email/Slack).
+6. **Fast-Apply Interface** – Opens JD + pre-fills form locally (user click only).
+7. **Ollama LLM Interface** – Central inference module, user-selectable models, hallucination-guarded.
+8. **Storage** – DuckDB/SQLite for structured data; Parquet for history.
+
+---
+
+## **5. Fit Scoring Framework**
+
+| Component            | Weight | Description                               |
+| -------------------- | ------ | ----------------------------------------- |
+| Core skills          | 40 %   | Direct skill overlap between JD & resume. |
+| Role alignment       | 25 %   | Seniority + function similarity.          |
+| Domain/stack         | 20 %   | Tools, frameworks, finance/AI keywords.   |
+| Location/eligibility | 5 %    | Country/city match, visa clauses.         |
+| Soft signals         | 10 %   | Leadership, research, culture keywords.   |
+
+**Outputs:**
+
+* `match_score_percent` (0-100)
+* `fit_reasons[]`, `gap_reasons[]` (text + source citations)
+
+---
+
+## **6. Ollama LLM Integration**
+
+**Purpose:** Local, privacy-safe inference for parsing, summarization, and fit explanations.
+
+### A. Functional overview
+
+* Enumerates installed Ollama models (`ollama list`).
+* Chooses model automatically per task or via user selection.
+* Sends prompts to `localhost:11434/api/generate`.
+* Receives streamed text, validates against reference tokens.
+* Returns verified, structured JSON output.
+
+### B. Task-to-Model Mapping (editable in `ollama_config.yaml`)
+
+| Task                | Default Model    | Alt                |
+| ------------------- | ---------------- | ------------------ |
+| Resume parsing      | `mistral:latest` | `phi3:mini`        |
+| JD parsing          | `llama3:latest`  | `mistral:7b`       |
+| Fit explanation     | `phi3:latest`    | `mistral:instruct` |
+| News classification | `gemma:2b`       | `phi3:mini`        |
+
+### C. Hallucination controls
+
+1. **Rule-first extraction** → LLM sees structured facts only.
+2. **Grounded prompting** → “Use only the supplied text.”
+3. **Post-generation verification** → cross-check claims against tokens.
+4. **Low temperature (≤ 0.2)** for determinism.
+5. **Periodic human validation** for calibration.
+
+---
+
+## **7. Data Model (simplified)**
+
+**Jobs Table**
+
+```
+company_id | company_name | job_id | title | location | date_posted | status | jd_url | ats_type | match_score | fit_reasons | gap_reasons | snapshot_link | date_scraped
+```
+
+**News Table**
+
+```
+company_id | source | headline | url | date | tag (hiring|layoff|expansion|freeze) | region (IN|Global)
+```
+
+---
+
+## **8. Architecture Overview**
+
+1. **Scheduler** → triggers scrapers nightly (GitHub Actions / cron).
+2. **Scraper Layer** → ATS-specific + generic page parsers.
+3. **Parser Layer** → cleans & tokenizes resume/JD text.
+4. **Ollama LLM Interface** → localized inference & validation.
+5. **Database Layer** → DuckDB for analytics, Parquet archives.
+6. **Alert Layer** → generates high-fit notifications.
+7. **Dashboard (Streamlit)** → search, filters, one-click open-JD, attached news feed.
+
+---
+
+## **9. News–Job Correlation Logic**
+
+* Each company node aggregates:
+
+  * Recent posting velocity (7-day moving avg).
+  * News sentiment signals (weighted: hiring +1, layoff -1).
+* Alert priority = `fit_score × (1 + news_signal_weight)`.
+* Global layoff news affecting parent company flags Indian GCCs with “watch” status.
+
+---
+
+## **10. Compliance & Ethics**
+
+* All scraping honors `robots.txt`.
+* Identify user agent clearly, throttle requests, respect rate limits.
+* Store only public information.
+* No credential harvesting or automated application submission.
+
+---
+
+## **11. KPIs**
+
+| Metric                  | Target                                        |
+| ----------------------- | --------------------------------------------- |
+| Job coverage            | ≥ 90 % of 100–150 targets weekly              |
+| Freshness               | ≤ 24 h lag for new postings                   |
+| Fit-alert precision     | ≥ 85 % validated relevance                    |
+| Hallucination incidence | ≤ 2 % unverifiable statements in explanations |
+| System uptime           | ≥ 95 % scheduler success rate                 |
+
+---
+
+## **12. Deliverables**
+
+1. Canonical GCC list (CSV).
+2. Configurable Ollama LLM interface module.
+3. Scraper + storage pipeline.
+4. Resume/JD parsers and scoring engine.
+5. Alerting + Streamlit dashboard.
+6. Documentation and runbook.
+
+---
+
+## **13. Future Extensions**
+
+* **Auto-Apply Agent:** safe form-fill submission with consent.
+* **Multi-profile Matching:** different resumes per role type.
+* **Temporal Trend Analytics:** company-wise hiring velocity over months.
+* **Benchmark Runner:** test multiple Ollama models for speed/accuracy trade-offs.
+* **Local fine-tuning:** adapter-based optimization on your own resume/JD corpus.
+
+---
+
+### ✅ **Summary**
+
+The system now forms a **legally clean, locally intelligent, privacy-preserving job engine** that:
+
+* Uses deterministic scraping and grounding to prevent hallucination,
+* Integrates Ollama for all LLM activities with pluggable model choice,
+* Monitors both Indian and global hiring signals,
+* Prioritizes applying first, analytics second.
+
+---
+
+Would you like me to produce the **implementation checklist next** (modules × priority × acceptance criteria) to guide an engineering or agentic build?
